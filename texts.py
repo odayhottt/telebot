@@ -163,14 +163,33 @@ TEXTS = {
     },
 
     "autobuttons_menu": {
-        "ar": "🔘 الأزرار التلقائية\nالحالة: {status}\nالزر الحالي: {label}\n\n"
-              "سيُضاف هذا الزر تلقائياً تحت كل منشور جديد بالقناة.",
-        "en": "🔘 Auto-buttons\nStatus: {status}\nCurrent button: {label}\n\n"
-              "This button will be added automatically under every new post.",
+        "ar": "🔘 الأزرار التلقائية\nالحالة: {status}\nالأزرار الحالية ({count}):\n{labels}\n\n"
+              "ستُضاف هذي الأزرار تلقائياً تحت كل منشور جديد بالقناة.",
+        "en": "🔘 Auto-buttons\nStatus: {status}\nCurrent buttons ({count}):\n{labels}\n\n"
+              "These buttons will be added automatically under every new post.",
     },
     "ask_button_label": {
-        "ar": "أرسل نص الزر ثم رابطه، مفصولين بـ | \nمثال:\nتابعنا على يوتيوب|https://youtube.com/@اسمك",
-        "en": "Send the button text then its URL, separated by | \nExample:\nFollow on YouTube|https://youtube.com/@you",
+        "ar": "أرسل الزر الأول: النص ثم الرابط، مفصولين بـ |\n"
+              "مثال:\nتابعنا على يوتيوب|https://youtube.com/@اسمك\n\n"
+              "✨ عندك اشتراك بريميوم؟ ضيف إيموجي مميز بأول النص وراح يظهر بجانب الزر تلقائياً.\n\n"
+              "بعد كل زر ترسله، تقدر ترسل زر إضافي أو تضغط "
+              "\"✅ تم الحفظ\" لإنهاء الإضافة — أرسل بأي عدد من الأزرار تبيه.",
+        "en": "Send the first button: text then URL, separated by |\n"
+              "Example:\nFollow on YouTube|https://youtube.com/@you\n\n"
+              "✨ Have Premium? Add a custom emoji at the start of the text and it'll show next to the button automatically.\n\n"
+              "After each button, send another one or press \"✅ Save\" to finish — add as many buttons as you like.",
+    },
+    "button_added": {
+        "ar": "✅ تمت إضافة الزر ({count} زر حتى الآن).\nأرسل زر إضافي، أو اضغط \"✅ تم الحفظ\".",
+        "en": "✅ Button added ({count} so far).\nSend another one, or press \"✅ Save\".",
+    },
+    "btn_save_buttons": {"ar": "✅ تم الحفظ", "en": "✅ Save"},
+    "btn_cancel_all": {"ar": "❌ إلغاء الكل", "en": "❌ Cancel all"},
+    "buttons_saved": {"ar": "✅ تم حفظ {count} زر بنجاح.", "en": "✅ Saved {count} button(s)."},
+    "buttons_cancelled": {"ar": "تم إلغاء الإضافة.", "en": "Cancelled."},
+    "buttons_need_at_least_one": {
+        "ar": "⚠️ أضف زر واحد على الأقل قبل الحفظ.",
+        "en": "⚠️ Add at least one button before saving.",
     },
     "invalid_button_format": {
         "ar": "⚠️ الصيغة غير صحيحة. استخدم: النص|الرابط",

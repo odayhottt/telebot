@@ -92,8 +92,8 @@ def language_keyboard() -> InlineKeyboardMarkup:
 
 def confirm_post_keyboard(lang: str = "ar") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ نشر الآن" if lang == "ar" else "✅ Post Now",
-                               callback_data="confirm_selection")],
+        [styled_button("✅ نشر الآن" if lang == "ar" else "✅ Post Now",
+                        callback_data="confirm_selection", style="success")],
         [InlineKeyboardButton(text=t("btn_back", lang), callback_data="menu_main")],
     ])
 
@@ -117,6 +117,25 @@ def toggle_only_keyboard(lang: str, callback_data: str, back_data: str) -> Inlin
     ])
 
 
+def styled_button(text: str, callback_data: str = None, url: str = None,
+                   style: str = None, icon_custom_emoji_id: str = None) -> InlineKeyboardButton:
+    """
+    زر بلون (Bot API 9.4+): style = 'success' أخضر، 'danger' أحمر، 'primary' أزرق.
+    icon_custom_emoji_id: إيموجي مميز (بريميوم) يظهر قبل نص الزر.
+    على تطبيقات تيليجرام الأقدم من فبراير 2026 يظهر الزر بشكله المعتاد دون هذي الإضافات.
+    """
+    kwargs = {"text": text}
+    if callback_data:
+        kwargs["callback_data"] = callback_data
+    if url:
+        kwargs["url"] = url
+    if style:
+        kwargs["style"] = style
+    if icon_custom_emoji_id:
+        kwargs["icon_custom_emoji_id"] = icon_custom_emoji_id
+    return InlineKeyboardButton(**kwargs)
+
+
 def toggle_and_edit_keyboard(lang: str, toggle_cb: str, edit_cb: str, back_data: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t("btn_toggle", lang), callback_data=toggle_cb)],
@@ -138,12 +157,12 @@ def gated_channel_choice_keyboard(channels: list, lang: str = "ar") -> InlineKey
 
 def gated_post_delivery_keyboard(post_id: int, lang: str = "ar") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t("gated_button_text", lang), callback_data=f"gated_get_{post_id}")]
+        [styled_button(t("gated_button_text", lang), callback_data=f"gated_get_{post_id}", style="primary")]
     ])
 
 
 def gated_join_prompt_keyboard(post_id: int, invite_link: str, lang: str = "ar") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t("gated_join_button", lang), url=invite_link)],
-        [InlineKeyboardButton(text=t("gated_check_again_button", lang), callback_data=f"gated_get_{post_id}")],
+        [styled_button(t("gated_join_button", lang), url=invite_link, style="primary")],
+        [styled_button(t("gated_check_again_button", lang), callback_data=f"gated_get_{post_id}", style="success")],
     ])

@@ -204,7 +204,8 @@ async def on_channel_post(message: Message):
             if needs_buttons:
                 buttons = json.loads(cfg["buttons_json"])
                 markup = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=b["text"], url=b["url"])] for b in buttons
+                    [kb.styled_button(b["text"], url=b["url"], icon_custom_emoji_id=b.get("emoji_id"))]
+                    for b in buttons
                 ])
 
             if needs_signature:
@@ -325,9 +326,9 @@ async def cb_autobuttons_menu(callback: CallbackQuery):
     cfg = db.get_channel_settings(chat_id)
     status = t("status_on", lang) if cfg["buttons_enabled"] else t("status_off", lang)
     buttons = json.loads(cfg["buttons_json"] or "[]")
-    label = buttons[0]["text"] if buttons else t("none_set", lang)
+    labels = "\n".join(f"• {b['text']}" for b in buttons) if buttons else t("none_set", lang)
     await callback.message.edit_text(
-        t("autobuttons_menu", lang, status=status, label=label),
+        t("autobuttons_menu", lang, status=status, count=len(buttons), labels=labels),
         reply_markup=kb.toggle_and_edit_keyboard(
             lang, f"btntoggle_{chat_id}", f"btnedit_{chat_id}", f"view_channel_{chat_id}"
         ),
@@ -347,18 +348,27 @@ async def cb_autobuttons_toggle(callback: CallbackQuery):
 async def cb_autobuttons_edit(callback: CallbackQuery, state: FSMContext):
     lang = lang_of(callback.from_user.id)
     chat_id = int(callback.data.split("_")[-1])
-    await state.update_data(target_chat_id=chat_id)
+    await state.update_data(target_chat_id=chat_id, new_buttons=[])
     await state.set_state(AutoButtonStates.waiting_input)
     await callback.message.edit_text(t("ask_button_label", lang), reply_markup=kb.back_keyboard(lang))
     await callback.answer()
 
 
+def _extract_custom_emoji_id(message: Message) -> str | None:
+    """يستخرج معرّف أول إيموجي مميز (بريميوم) موجود بنص الرسالة، إن وُجد."""
+    for entity in (message.entities or []):
+        if entity.type == "custom_emoji" and getattr(entity, "custom_emoji_id", None):
+            return entity.custom_emoji_id
+    return None
+
+
 @router.message(AutoButtonStates.waiting_input)
 async def autobuttons_receive_input(message: Message, state: FSMContext):
     lang = lang_of(message.from_user.id)
-    if "|" not in message.text:
+    if not message.text or "|" not in message.text:
         await message.answer(t("invalid_button_format", lang))
         return
+
     label, url = message.text.split("|", 1)
     label, url = label.strip(), url.strip()
     if url.startswith("t.me/") or url.startswith("www.t.me/"):
@@ -367,12 +377,46 @@ async def autobuttons_receive_input(message: Message, state: FSMContext):
         await message.answer(t("invalid_button_format", lang))
         return
 
+    emoji_id = _extract_custom_emoji_id(message)
+
     data = await state.get_data()
-    db.update_channel_settings(
-        data["target_chat_id"], buttons_json=json.dumps([{"text": label, "url": url}])
+    new_buttons = list(data.get("new_buttons", []))
+    new_buttons.append({"text": label, "url": url, "emoji_id": emoji_id})
+    await state.update_data(new_buttons=new_buttons)
+
+    await message.answer(
+        t("button_added", lang, count=len(new_buttons)),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [kb.styled_button(t("btn_save_buttons", lang), callback_data="autobtn_finish", style="success")],
+            [kb.styled_button(t("btn_cancel_all", lang), callback_data="autobtn_cancel_all", style="danger")],
+        ]),
     )
+
+
+@router.callback_query(AutoButtonStates.waiting_input, F.data == "autobtn_finish")
+async def cb_autobuttons_finish(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    data = await state.get_data()
+    new_buttons = data.get("new_buttons", [])
+
+    if not new_buttons:
+        await callback.answer(t("buttons_need_at_least_one", lang), show_alert=True)
+        return
+
+    db.update_channel_settings(data["target_chat_id"], buttons_json=json.dumps(new_buttons))
     await state.clear()
-    await message.answer(t("message_updated", lang))
+    await callback.message.edit_text(
+        t("buttons_saved", lang, count=len(new_buttons)), reply_markup=kb.back_keyboard(lang)
+    )
+    await callback.answer()
+
+
+@router.callback_query(AutoButtonStates.waiting_input, F.data == "autobtn_cancel_all")
+async def cb_autobuttons_cancel(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    await state.clear()
+    await callback.message.edit_text(t("buttons_cancelled", lang), reply_markup=kb.back_keyboard(lang))
+    await callback.answer()
 
 
 # --- النشر المتبادل ---
@@ -904,9 +948,10 @@ async def on_chat_member_update(event: ChatMemberUpdated):
                 chat.id,
                 t("captcha_prompt", lang, name=user.full_name, timeout=timeout),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(
-                        text=t("captcha_button", lang),
+                    kb.styled_button(
+                        t("captcha_button", lang),
                         callback_data=f"captcha_ok_{user.id}",
+                        style="success",
                     )
                 ]]),
             )
