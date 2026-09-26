@@ -1194,7 +1194,9 @@ async def main():
     await start_web_server()
     asyncio.create_task(background_scheduler())
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    # drop_pending_updates=False يضمن معالجة أي رسائل تجمّعت وقت توقف
+    # الخدمة (نوم Render المجاني)، بدل حذفها والتظاهر بعدم الاستجابة
+    await bot.delete_webhook(drop_pending_updates=False)
     await dp.start_polling(bot)
 
 
