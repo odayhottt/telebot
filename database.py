@@ -99,6 +99,61 @@ def init_db():
             )
         """)
 
+        # ميزات القنوات: توقيع تلقائي، أزرار تلقائية، نشر متبادل،
+        # حذف تلقائي، موافقة تلقائية على طلبات الانضمام
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS channel_settings (
+                chat_id INTEGER PRIMARY KEY,
+                signature_enabled INTEGER DEFAULT 0,
+                signature_text TEXT DEFAULT '',
+                buttons_enabled INTEGER DEFAULT 0,
+                buttons_json TEXT DEFAULT '[]',
+                crosspost_targets TEXT DEFAULT '[]',
+                autodelete_enabled INTEGER DEFAULT 0,
+                autodelete_minutes INTEGER DEFAULT 60,
+                joinrequest_autoapprove INTEGER DEFAULT 0
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS scheduled_deletions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER,
+                message_id INTEGER,
+                delete_at INTEGER
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS subscriber_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER,
+                member_count INTEGER,
+                recorded_at INTEGER
+            )
+        """)
+
+        # منشورات "المهمة": محتوى يُسلَّم فقط لمن ينضم لقناة معينة أولاً
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS gated_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER,
+                content_text TEXT,
+                required_chat_id INTEGER,
+                invite_link TEXT,
+                created_at INTEGER
+            )
+        """)
+
+        # يمنع تكرار تعديل نفس الرسالة أكثر من مرة (توقيع/أزرار)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS processed_posts (
+                chat_id INTEGER,
+                message_id INTEGER,
+                PRIMARY KEY (chat_id, message_id)
+            )
+        """)
+
 
 # ---------------------------------------------------------
 # القنوات
@@ -345,3 +400,115 @@ def get_recent_events(limit: int = 20):
             "SELECT * FROM event_log ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------
+# إعدادات القناة (توقيع، أزرار، نشر متبادل، حذف تلقائي، طلبات انضمام)
+# ---------------------------------------------------------
+
+def get_channel_settings(chat_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO channel_settings (chat_id) VALUES (?)", (chat_id,)
+        )
+        row = conn.execute(
+            "SELECT * FROM channel_settings WHERE chat_id = ?", (chat_id,)
+        ).fetchone()
+        return dict(row)
+
+
+def update_channel_settings(chat_id: int, **fields):
+    if not fields:
+        return
+    get_channel_settings(chat_id)  # يضمن وجود الصف
+    columns = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [chat_id]
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE channel_settings SET {columns} WHERE chat_id = ?", values
+        )
+
+
+def mark_processed(chat_id: int, message_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO processed_posts (chat_id, message_id) VALUES (?, ?)",
+            (chat_id, message_id),
+        )
+
+
+def was_processed(chat_id: int, message_id: int) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM processed_posts WHERE chat_id = ? AND message_id = ?",
+            (chat_id, message_id),
+        ).fetchone()
+        return row is not None
+
+
+# ---------------------------------------------------------
+# الحذف التلقائي المجدول
+# ---------------------------------------------------------
+
+def add_scheduled_deletion(chat_id: int, message_id: int, delete_at: int):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO scheduled_deletions (chat_id, message_id, delete_at) VALUES (?, ?, ?)",
+            (chat_id, message_id, delete_at),
+        )
+
+
+def get_due_deletions(now: int):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM scheduled_deletions WHERE delete_at <= ?", (now,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def remove_scheduled_deletion(row_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM scheduled_deletions WHERE id = ?", (row_id,))
+
+
+# ---------------------------------------------------------
+# إحصائيات المشتركين
+# ---------------------------------------------------------
+
+def record_subscriber_count(chat_id: int, count: int):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO subscriber_stats (chat_id, member_count, recorded_at) VALUES (?, ?, ?)",
+            (chat_id, count, int(time.time())),
+        )
+
+
+def get_subscriber_history(chat_id: int, limit: int = 2):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM subscriber_stats WHERE chat_id = ? ORDER BY recorded_at DESC LIMIT ?",
+            (chat_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------
+# منشورات المهمة (Join-gate)
+# ---------------------------------------------------------
+
+def add_gated_post(owner_id: int, content_text: str, required_chat_id: int, invite_link: str):
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO gated_posts (owner_id, content_text, required_chat_id, invite_link, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (owner_id, content_text, required_chat_id, invite_link, int(time.time())),
+        )
+        return cur.lastrowid
+
+
+def get_gated_post(post_id: int):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM gated_posts WHERE id = ?", (post_id,)
+        ).fetchone()
+        return dict(row) if row else None

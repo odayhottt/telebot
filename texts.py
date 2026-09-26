@@ -138,6 +138,107 @@ TEXTS = {
         "ar": "⚠️ هذا الأمر يعمل فقط داخل مجموعة، ويجب أن تكون مشرفاً فيها.",
         "en": "⚠️ This command only works inside a group, and you must be an admin there.",
     },
+
+    "btn_channel_settings": {"ar": "⚙️ إعدادات القناة", "en": "⚙️ Channel Settings"},
+    "channel_settings_menu": {
+        "ar": "⚙️ إعدادات قناة: {title}\n\nاختر ميزة لضبطها:",
+        "en": "⚙️ Settings for: {title}\n\nChoose a feature to configure:",
+    },
+    "btn_signature": {"ar": "✍️ التوقيع التلقائي", "en": "✍️ Auto-signature"},
+    "btn_autobuttons": {"ar": "🔘 الأزرار التلقائية", "en": "🔘 Auto-buttons"},
+    "btn_crosspost": {"ar": "🔁 النشر المتبادل", "en": "🔁 Cross-posting"},
+    "btn_autodelete": {"ar": "🗑 الحذف التلقائي", "en": "🗑 Auto-delete"},
+    "btn_joinrequest": {"ar": "✅ الموافقة التلقائية", "en": "✅ Auto-approve requests"},
+    "btn_stats": {"ar": "📈 نمو المشتركين", "en": "📈 Subscriber growth"},
+
+    "signature_menu": {
+        "ar": "✍️ التوقيع التلقائي\nالحالة: {status}\nالنص الحالي:\n{text}\n\n"
+              "سيُضاف هذا النص تلقائياً في نهاية كل منشور جديد بالقناة.",
+        "en": "✍️ Auto-signature\nStatus: {status}\nCurrent text:\n{text}\n\n"
+              "This text will be appended automatically to every new post in the channel.",
+    },
+    "ask_signature_text": {
+        "ar": "أرسل نص التوقيع الذي تريد إضافته تلقائياً بنهاية كل منشور:",
+        "en": "Send the signature text to append automatically to every post:",
+    },
+
+    "autobuttons_menu": {
+        "ar": "🔘 الأزرار التلقائية\nالحالة: {status}\nالزر الحالي: {label}\n\n"
+              "سيُضاف هذا الزر تلقائياً تحت كل منشور جديد بالقناة.",
+        "en": "🔘 Auto-buttons\nStatus: {status}\nCurrent button: {label}\n\n"
+              "This button will be added automatically under every new post.",
+    },
+    "ask_button_label": {
+        "ar": "أرسل نص الزر ثم رابطه، مفصولين بـ | \nمثال:\nتابعنا على يوتيوب|https://youtube.com/@اسمك",
+        "en": "Send the button text then its URL, separated by | \nExample:\nFollow on YouTube|https://youtube.com/@you",
+    },
+    "invalid_button_format": {
+        "ar": "⚠️ الصيغة غير صحيحة. استخدم: النص|الرابط",
+        "en": "⚠️ Invalid format. Use: text|url",
+    },
+    "none_set": {"ar": "لا يوجد", "en": "none"},
+
+    "crosspost_menu": {
+        "ar": "🔁 النشر المتبادل\nأي منشور جديد بهذه القناة يُنسخ تلقائياً للقنوات التالية:\n{targets}",
+        "en": "🔁 Cross-posting\nAny new post here is automatically copied to:\n{targets}",
+    },
+    "crosspost_choose": {
+        "ar": "اختر القنوات الهدف (تُنسخ لها المنشورات تلقائياً)، ثم اضغط تأكيد:",
+        "en": "Select target channels (posts will be copied there automatically), then confirm:",
+    },
+    "crosspost_saved": {"ar": "✅ تم حفظ إعدادات النشر المتبادل.", "en": "✅ Cross-posting settings saved."},
+
+    "autodelete_menu": {
+        "ar": "🗑 الحذف التلقائي\nالحالة: {status}\nيُحذف كل منشور جديد بعد: {minutes} دقيقة",
+        "en": "🗑 Auto-delete\nStatus: {status}\nEach new post is deleted after: {minutes} minutes",
+    },
+    "ask_autodelete_minutes": {
+        "ar": "أرسل عدد الدقائق التي يبقى بعدها المنشور قبل حذفه تلقائياً (رقم فقط):",
+        "en": "Send the number of minutes a post should stay before auto-deletion (number only):",
+    },
+    "invalid_number": {"ar": "⚠️ أرسل رقماً صحيحاً.", "en": "⚠️ Please send a valid number."},
+
+    "joinrequest_menu": {
+        "ar": "✅ الموافقة التلقائية على طلبات الانضمام\nالحالة: {status}\n\n"
+              "عند التفعيل: أي شخص يطلب الانضمام لقناتك الخاصة تتم الموافقة عليه تلقائياً وفوراً.",
+        "en": "✅ Auto-approve join requests\nStatus: {status}\n\n"
+              "When enabled: anyone requesting to join your private channel is approved instantly.",
+    },
+
+    "stats_no_data": {
+        "ar": "لا توجد بيانات كافية بعد. البوت يسجل عدد المشتركين تلقائياً كل ساعة تقريباً — راجع لاحقاً.",
+        "en": "Not enough data yet. The bot records subscriber count roughly hourly — check back later.",
+    },
+    "stats_result": {
+        "ar": "📈 نمو المشتركين — {title}\nالعدد الحالي: {current}\nالعدد السابق: {previous}\nالتغيّر: {diff}",
+        "en": "📈 Subscriber growth — {title}\nCurrent: {current}\nPrevious: {previous}\nChange: {diff}",
+    },
+
+    "btn_gated_post": {"ar": "🔒 منشور مشروط بالانضمام", "en": "🔒 Join-gated Post"},
+    "gated_intro": {
+        "ar": "✏️ أرسل المحتوى الذي تريد تسليمه فقط لمن ينضم لقناة معينة أولاً "
+              "(نص، أو رابط، أو أي شيء تريد إرساله).",
+        "en": "✏️ Send the content that should only be delivered to those who first join a specific channel.",
+    },
+    "gated_choose_channel": {
+        "ar": "اختر القناة الخاصة التي يجب على المستخدم الانضمام لها أولاً:",
+        "en": "Select the private channel the user must join first:",
+    },
+    "gated_no_invite_link": {
+        "ar": "⚠️ تعذّر إنشاء رابط دعوة لهذه القناة. تأكد أن البوت مشرف بصلاحية دعوة المستخدمين.",
+        "en": "⚠️ Couldn't create an invite link for this channel. Make sure the bot is admin with invite permission.",
+    },
+    "gated_created": {
+        "ar": "✅ تم إنشاء المنشور المشروط. انسخ الرسالة التالية وانشرها أينما تريد:",
+        "en": "✅ Join-gated post created. Copy the message below and share it anywhere:",
+    },
+    "gated_button_text": {"ar": "🔓 احصل على المحتوى", "en": "🔓 Get the content"},
+    "gated_not_member": {
+        "ar": "⚠️ يجب عليك الانضمام للقناة أولاً، ثم اضغط الزر مرة أخرى.",
+        "en": "⚠️ You must join the channel first, then press the button again.",
+    },
+    "gated_join_button": {"ar": "📢 انضم للقناة", "en": "📢 Join channel"},
+    "gated_check_again_button": {"ar": "🔄 تحقق مرة أخرى", "en": "🔄 Check again"},
 }
 
 
