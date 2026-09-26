@@ -76,6 +76,27 @@ class EditMessageStates(StatesGroup):
     waiting_goodbye_text = State()
 
 
+class SignatureStates(StatesGroup):
+    waiting_text = State()
+
+
+class AutoButtonStates(StatesGroup):
+    waiting_input = State()
+
+
+class CrosspostStates(StatesGroup):
+    choosing_targets = State()
+
+
+class AutodeleteStates(StatesGroup):
+    waiting_minutes = State()
+
+
+class GatedPostStates(StatesGroup):
+    waiting_content = State()
+    choosing_channel = State()
+
+
 # ---------------------------------------------------------
 # القائمة الرئيسية
 # ---------------------------------------------------------
@@ -141,8 +162,20 @@ async def cb_set_language(callback: CallbackQuery):
 
 @router.channel_post()
 async def on_channel_post(message: Message):
-    """أي رسالة تُنشر في قناة يديرها البوت تُستخدم لتسجيل القناة تلقائياً."""
+    """
+    أي رسالة تُنشر في قناة يديرها البوت:
+    1) تُستخدم لتسجيل القناة تلقائياً إن لم تكن مسجلة.
+    2) يُطبَّق عليها التوقيع/الأزرار التلقائية إن كانت مفعّلة.
+    3) تُنسخ لقنوات النشر المتبادل إن وُجدت.
+    4) تُجدوَل للحذف التلقائي إن كان مفعّلاً.
+    """
     chat = message.chat
+
+    # تجاهل الرسائل التي عدّلها البوت نفسه (لإضافة التوقيع/الأزرار) لمنع التكرار
+    if db.was_processed(chat.id, message.message_id):
+        return
+    db.mark_processed(chat.id, message.message_id)
+
     try:
         admins = await bot.get_chat_administrators(chat.id)
         owner_ids = [m.user.id for m in admins if m.status == ChatMemberStatus.CREATOR]
@@ -154,6 +187,50 @@ async def on_channel_post(message: Message):
     if not existing:
         db.add_channel(chat.id, chat.title or str(chat.id), owner_id)
         db.log_event(chat.id, "channel_registered", chat.title or "")
+
+    cfg = db.get_channel_settings(chat.id)
+
+    # --- التوقيع التلقائي + الأزرار التلقائية (تعديل نفس الرسالة) ---
+    needs_signature = cfg["signature_enabled"] and cfg["signature_text"] and message.text
+    needs_buttons = cfg["buttons_enabled"] and json.loads(cfg["buttons_json"] or "[]")
+
+    if needs_signature or needs_buttons:
+        try:
+            new_text = message.text or ""
+            if needs_signature:
+                new_text = f"{new_text}\n\n{cfg['signature_text']}"
+
+            markup = None
+            if needs_buttons:
+                buttons = json.loads(cfg["buttons_json"])
+                markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=b["text"], url=b["url"])] for b in buttons
+                ])
+
+            if needs_signature:
+                await bot.edit_message_text(
+                    chat_id=chat.id, message_id=message.message_id,
+                    text=new_text, reply_markup=markup,
+                )
+            elif needs_buttons:
+                await bot.edit_message_reply_markup(
+                    chat_id=chat.id, message_id=message.message_id, reply_markup=markup,
+                )
+        except Exception as e:
+            logging.warning(f"فشل تعديل المنشور لإضافة التوقيع/الأزرار: {e}")
+
+    # --- النشر المتبادل (نسخ لقنوات أخرى) ---
+    targets = json.loads(cfg["crosspost_targets"] or "[]")
+    for target_id in targets:
+        try:
+            await bot.copy_message(target_id, chat.id, message.message_id)
+        except Exception as e:
+            logging.warning(f"فشل النشر المتبادل إلى {target_id}: {e}")
+
+    # --- جدولة الحذف التلقائي ---
+    if cfg["autodelete_enabled"]:
+        delete_at = int(time.time()) + cfg["autodelete_minutes"] * 60
+        db.add_scheduled_deletion(chat.id, message.message_id, delete_at)
 
 
 @router.my_chat_member()
@@ -179,6 +256,303 @@ async def cb_channels(callback: CallbackQuery):
             "🗂 " + t("btn_channels", lang),
             reply_markup=kb.channels_list_keyboard(channels, lang),
         )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("view_channel_"))
+async def cb_view_channel(callback: CallbackQuery):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    channel = db.get_channel(chat_id)
+    title = channel["title"] if channel else str(chat_id)
+    await callback.message.edit_text(
+        t("channel_settings_menu", lang, title=title),
+        reply_markup=kb.channel_settings_menu_keyboard(chat_id, lang),
+    )
+    await callback.answer()
+
+
+# --- التوقيع التلقائي ---
+
+@router.callback_query(F.data.startswith("chset_sig_"))
+async def cb_signature_menu(callback: CallbackQuery):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    status = t("status_on", lang) if cfg["signature_enabled"] else t("status_off", lang)
+    text = cfg["signature_text"] or t("none_set", lang)
+    await callback.message.edit_text(
+        t("signature_menu", lang, status=status, text=text),
+        reply_markup=kb.toggle_and_edit_keyboard(
+            lang, f"sigtoggle_{chat_id}", f"sigedit_{chat_id}", f"view_channel_{chat_id}"
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("sigtoggle_"))
+async def cb_signature_toggle(callback: CallbackQuery):
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    db.update_channel_settings(chat_id, signature_enabled=0 if cfg["signature_enabled"] else 1)
+    await cb_signature_menu(callback)
+
+
+@router.callback_query(F.data.startswith("sigedit_"))
+async def cb_signature_edit(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    await state.update_data(target_chat_id=chat_id)
+    await state.set_state(SignatureStates.waiting_text)
+    await callback.message.edit_text(t("ask_signature_text", lang), reply_markup=kb.back_keyboard(lang))
+    await callback.answer()
+
+
+@router.message(SignatureStates.waiting_text)
+async def signature_receive_text(message: Message, state: FSMContext):
+    data = await state.get_data()
+    db.update_channel_settings(data["target_chat_id"], signature_text=message.text)
+    await state.clear()
+    await message.answer(t("message_updated", lang_of(message.from_user.id)))
+
+
+# --- الأزرار التلقائية ---
+
+@router.callback_query(F.data.startswith("chset_btn_"))
+async def cb_autobuttons_menu(callback: CallbackQuery):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    status = t("status_on", lang) if cfg["buttons_enabled"] else t("status_off", lang)
+    buttons = json.loads(cfg["buttons_json"] or "[]")
+    label = buttons[0]["text"] if buttons else t("none_set", lang)
+    await callback.message.edit_text(
+        t("autobuttons_menu", lang, status=status, label=label),
+        reply_markup=kb.toggle_and_edit_keyboard(
+            lang, f"btntoggle_{chat_id}", f"btnedit_{chat_id}", f"view_channel_{chat_id}"
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("btntoggle_"))
+async def cb_autobuttons_toggle(callback: CallbackQuery):
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    db.update_channel_settings(chat_id, buttons_enabled=0 if cfg["buttons_enabled"] else 1)
+    await cb_autobuttons_menu(callback)
+
+
+@router.callback_query(F.data.startswith("btnedit_"))
+async def cb_autobuttons_edit(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    await state.update_data(target_chat_id=chat_id)
+    await state.set_state(AutoButtonStates.waiting_input)
+    await callback.message.edit_text(t("ask_button_label", lang), reply_markup=kb.back_keyboard(lang))
+    await callback.answer()
+
+
+@router.message(AutoButtonStates.waiting_input)
+async def autobuttons_receive_input(message: Message, state: FSMContext):
+    lang = lang_of(message.from_user.id)
+    if "|" not in message.text:
+        await message.answer(t("invalid_button_format", lang))
+        return
+    label, url = message.text.split("|", 1)
+    label, url = label.strip(), url.strip()
+    if url.startswith("t.me/") or url.startswith("www.t.me/"):
+        url = "https://" + url
+    if not (url.startswith("http://") or url.startswith("https://")):
+        await message.answer(t("invalid_button_format", lang))
+        return
+
+    data = await state.get_data()
+    db.update_channel_settings(
+        data["target_chat_id"], buttons_json=json.dumps([{"text": label, "url": url}])
+    )
+    await state.clear()
+    await message.answer(t("message_updated", lang))
+
+
+# --- النشر المتبادل ---
+
+@router.callback_query(F.data.startswith("chset_cross_"))
+async def cb_crosspost_menu(callback: CallbackQuery):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    target_ids = json.loads(cfg["crosspost_targets"] or "[]")
+    all_channels = db.get_channels_for_user(callback.from_user.id)
+    names = [c["title"] for c in all_channels if c["chat_id"] in target_ids]
+    targets_text = "\n".join(f"• {n}" for n in names) if names else t("none_set", lang)
+
+    await callback.message.edit_text(
+        t("crosspost_menu", lang, targets=targets_text),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text=t("btn_crosspost", lang), callback_data=f"crosschoose_{chat_id}"
+            )],
+            [InlineKeyboardButton(text=t("btn_back", lang), callback_data=f"view_channel_{chat_id}")],
+        ]),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("crosschoose_"))
+async def cb_crosspost_choose(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    source_chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(source_chat_id)
+    current_targets = set(json.loads(cfg["crosspost_targets"] or "[]"))
+
+    await state.update_data(source_chat_id=source_chat_id, selected=current_targets)
+    await state.set_state(CrosspostStates.choosing_targets)
+
+    all_channels = [c for c in db.get_channels_for_user(callback.from_user.id) if c["chat_id"] != source_chat_id]
+    await callback.message.edit_text(
+        t("crosspost_choose", lang),
+        reply_markup=kb.channels_list_keyboard(all_channels, lang, select_mode=True, selected=current_targets),
+    )
+    await callback.answer()
+
+
+@router.callback_query(CrosspostStates.choosing_targets, F.data.startswith("toggle_channel_"))
+async def cb_crosspost_toggle(callback: CallbackQuery, state: FSMContext):
+    chat_id = int(callback.data.split("_")[-1])
+    data = await state.get_data()
+    selected = set(data.get("selected", set()))
+    selected.symmetric_difference_update({chat_id})
+    await state.update_data(selected=selected)
+
+    lang = lang_of(callback.from_user.id)
+    all_channels = [c for c in db.get_channels_for_user(callback.from_user.id)
+                     if c["chat_id"] != data["source_chat_id"]]
+    await callback.message.edit_reply_markup(
+        reply_markup=kb.channels_list_keyboard(all_channels, lang, select_mode=True, selected=selected)
+    )
+    await callback.answer()
+
+
+@router.callback_query(CrosspostStates.choosing_targets, F.data == "confirm_selection")
+async def cb_crosspost_confirm(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    data = await state.get_data()
+    db.update_channel_settings(
+        data["source_chat_id"], crosspost_targets=json.dumps(list(data.get("selected", set())))
+    )
+    await state.clear()
+    await callback.message.edit_text(t("crosspost_saved", lang), reply_markup=kb.back_keyboard(lang))
+    await callback.answer()
+
+
+# --- الحذف التلقائي ---
+
+@router.callback_query(F.data.startswith("chset_del_"))
+async def cb_autodelete_menu(callback: CallbackQuery):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    status = t("status_on", lang) if cfg["autodelete_enabled"] else t("status_off", lang)
+    await callback.message.edit_text(
+        t("autodelete_menu", lang, status=status, minutes=cfg["autodelete_minutes"]),
+        reply_markup=kb.toggle_and_edit_keyboard(
+            lang, f"deltoggle_{chat_id}", f"deledit_{chat_id}", f"view_channel_{chat_id}"
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("deltoggle_"))
+async def cb_autodelete_toggle(callback: CallbackQuery):
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    db.update_channel_settings(chat_id, autodelete_enabled=0 if cfg["autodelete_enabled"] else 1)
+    await cb_autodelete_menu(callback)
+
+
+@router.callback_query(F.data.startswith("deledit_"))
+async def cb_autodelete_edit(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    await state.update_data(target_chat_id=chat_id)
+    await state.set_state(AutodeleteStates.waiting_minutes)
+    await callback.message.edit_text(t("ask_autodelete_minutes", lang), reply_markup=kb.back_keyboard(lang))
+    await callback.answer()
+
+
+@router.message(AutodeleteStates.waiting_minutes)
+async def autodelete_receive_minutes(message: Message, state: FSMContext):
+    lang = lang_of(message.from_user.id)
+    if not message.text.strip().isdigit():
+        await message.answer(t("invalid_number", lang))
+        return
+    minutes = int(message.text.strip())
+    data = await state.get_data()
+    db.update_channel_settings(data["target_chat_id"], autodelete_minutes=minutes)
+    await state.clear()
+    await message.answer(t("message_updated", lang))
+
+
+# --- الموافقة التلقائية على طلبات الانضمام ---
+
+@router.callback_query(F.data.startswith("chset_jr_"))
+async def cb_joinrequest_menu(callback: CallbackQuery):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    status = t("status_on", lang) if cfg["joinrequest_autoapprove"] else t("status_off", lang)
+    await callback.message.edit_text(
+        t("joinrequest_menu", lang, status=status),
+        reply_markup=kb.toggle_only_keyboard(lang, f"jrtoggle_{chat_id}", f"view_channel_{chat_id}"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("jrtoggle_"))
+async def cb_joinrequest_toggle(callback: CallbackQuery):
+    chat_id = int(callback.data.split("_")[-1])
+    cfg = db.get_channel_settings(chat_id)
+    db.update_channel_settings(chat_id, joinrequest_autoapprove=0 if cfg["joinrequest_autoapprove"] else 1)
+    await cb_joinrequest_menu(callback)
+
+
+@router.chat_join_request()
+async def on_chat_join_request(update):
+    cfg = db.get_channel_settings(update.chat.id)
+    if cfg["joinrequest_autoapprove"]:
+        try:
+            await bot.approve_chat_join_request(update.chat.id, update.from_user.id)
+            db.log_event(update.chat.id, "join_request_approved", update.from_user.full_name)
+        except Exception as e:
+            logging.warning(f"فشل قبول طلب الانضمام: {e}")
+
+
+# --- نمو المشتركين ---
+
+@router.callback_query(F.data.startswith("chset_stats_"))
+async def cb_stats(callback: CallbackQuery):
+    lang = lang_of(callback.from_user.id)
+    chat_id = int(callback.data.split("_")[-1])
+    history = db.get_subscriber_history(chat_id, limit=2)
+
+    if not history:
+        await callback.message.edit_text(
+            t("stats_no_data", lang),
+            reply_markup=kb.back_keyboard(lang, target=f"view_channel_{chat_id}"),
+        )
+        await callback.answer()
+        return
+
+    current = history[0]["member_count"]
+    previous = history[1]["member_count"] if len(history) > 1 else current
+    channel = db.get_channel(chat_id)
+    title = channel["title"] if channel else str(chat_id)
+
+    await callback.message.edit_text(
+        t("stats_result", lang, title=title, current=current, previous=previous, diff=current - previous),
+        reply_markup=kb.back_keyboard(lang, target=f"view_channel_{chat_id}"),
+    )
     await callback.answer()
 
 
@@ -459,7 +833,7 @@ async def cb_welcome_edit(callback: CallbackQuery, state: FSMContext):
     lang = lang_of(callback.from_user.id)
     await state.update_data(target_chat_id=callback.message.chat.id)
     await state.set_state(EditMessageStates.waiting_welcome_text)
-    await callback.message.edit_text(t("ask_new_message", lang))
+    await callback.message.edit_text(t("ask_new_message", lang), reply_markup=kb.back_keyboard(lang))
     await callback.answer()
 
 
@@ -468,7 +842,7 @@ async def cb_goodbye_edit(callback: CallbackQuery, state: FSMContext):
     lang = lang_of(callback.from_user.id)
     await state.update_data(target_chat_id=callback.message.chat.id)
     await state.set_state(EditMessageStates.waiting_goodbye_text)
-    await callback.message.edit_text(t("ask_new_message", lang))
+    await callback.message.edit_text(t("ask_new_message", lang), reply_markup=kb.back_keyboard(lang))
     await callback.answer()
 
 
@@ -579,6 +953,97 @@ async def cb_captcha_ok(callback: CallbackQuery):
 
 
 # ---------------------------------------------------------
+# منشور مشروط بالانضمام (Join-gated post)
+# ---------------------------------------------------------
+
+@router.callback_query(F.data == "menu_gated_post")
+async def cb_gated_post_start(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    channels = db.get_channels_for_user(callback.from_user.id)
+    if not channels:
+        await callback.message.edit_text(t("no_channels", lang), reply_markup=kb.back_keyboard(lang))
+        await callback.answer()
+        return
+    await state.set_state(GatedPostStates.waiting_content)
+    await callback.message.edit_text(t("gated_intro", lang), reply_markup=kb.back_keyboard(lang))
+    await callback.answer()
+
+
+@router.message(GatedPostStates.waiting_content)
+async def gated_receive_content(message: Message, state: FSMContext):
+    lang = lang_of(message.from_user.id)
+    await state.update_data(content_text=message.text)
+    channels = db.get_channels_for_user(message.from_user.id)
+    await state.set_state(GatedPostStates.choosing_channel)
+    await message.answer(
+        t("gated_choose_channel", lang),
+        reply_markup=kb.gated_channel_choice_keyboard(channels, lang),
+    )
+
+
+@router.callback_query(GatedPostStates.choosing_channel, F.data.startswith("gatedch_"))
+async def gated_channel_chosen(callback: CallbackQuery, state: FSMContext):
+    lang = lang_of(callback.from_user.id)
+    required_chat_id = int(callback.data.split("_")[-1])
+
+    try:
+        invite = await bot.create_chat_invite_link(required_chat_id, member_limit=None)
+        invite_link = invite.invite_link
+    except Exception as e:
+        logging.warning(f"فشل إنشاء رابط دعوة: {e}")
+        await callback.message.edit_text(t("gated_no_invite_link", lang), reply_markup=kb.back_keyboard(lang))
+        await state.clear()
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    post_id = db.add_gated_post(
+        owner_id=callback.from_user.id,
+        content_text=data["content_text"],
+        required_chat_id=required_chat_id,
+        invite_link=invite_link,
+    )
+    await state.clear()
+
+    await callback.message.edit_text(t("gated_created", lang), reply_markup=kb.back_keyboard(lang))
+    await callback.message.answer(
+        "🔒 " + (data["content_text"][:60] + "..." if len(data["content_text"]) > 60 else data["content_text"]),
+        reply_markup=kb.gated_post_delivery_keyboard(post_id, lang),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("gated_get_"))
+async def cb_gated_get_content(callback: CallbackQuery):
+    lang = lang_of(callback.from_user.id)
+    post_id = int(callback.data.split("_")[-1])
+    post = db.get_gated_post(post_id)
+    if not post:
+        await callback.answer()
+        return
+
+    try:
+        member = await bot.get_chat_member(post["required_chat_id"], callback.from_user.id)
+        is_member = member.status in (
+            ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR
+        )
+    except Exception:
+        is_member = False
+
+    if is_member:
+        await callback.answer()
+        await bot.send_message(callback.from_user.id, post["content_text"])
+    else:
+        await callback.answer(t("gated_not_member", lang), show_alert=True)
+        try:
+            await callback.message.edit_reply_markup(
+                reply_markup=kb.gated_join_prompt_keyboard(post_id, post["invite_link"], lang)
+            )
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------
 # سجل الأحداث
 # ---------------------------------------------------------
 
@@ -604,7 +1069,12 @@ async def cb_eventlog(callback: CallbackQuery):
 # مهمة خلفية: تنفيذ المنشورات المجدولة + طرد من لم يجتز الكابتشا
 # ---------------------------------------------------------
 
+_last_stats_run = 0  # آخر مرة سُجلت فيها إحصائيات المشتركين (بالثواني)
+STATS_INTERVAL_SECONDS = 3600  # تسجيل عدد المشتركين كل ساعة تقريباً
+
+
 async def background_scheduler():
+    global _last_stats_run
     while True:
         now = int(time.time())
 
@@ -628,6 +1098,26 @@ async def background_scheduler():
             except Exception:
                 pass
             db.remove_pending_captcha(chat_id, user_id)
+
+        # حذف المنشورات المستحقة للحذف التلقائي
+        for deletion in db.get_due_deletions(now):
+            try:
+                await bot.delete_message(deletion["chat_id"], deletion["message_id"])
+            except Exception:
+                pass
+            db.remove_scheduled_deletion(deletion["id"])
+
+        # تسجيل عدد المشتركين دورياً لكل قناة مسجلة
+        if now - _last_stats_run >= STATS_INTERVAL_SECONDS:
+            _last_stats_run = now
+            with db.get_conn() as conn:
+                all_channels = [dict(r) for r in conn.execute("SELECT chat_id FROM channels").fetchall()]
+            for ch in all_channels:
+                try:
+                    count = await bot.get_chat_member_count(ch["chat_id"])
+                    db.record_subscriber_count(ch["chat_id"], count)
+                except Exception:
+                    pass
 
         await asyncio.sleep(15)
 
